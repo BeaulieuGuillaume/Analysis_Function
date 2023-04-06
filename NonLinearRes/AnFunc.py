@@ -603,7 +603,7 @@ def fit_simulation(LogFileName,center_freq, span,plot=True):
     return port.fitresults
 #data["Frequency (GHz)"].to_numpy()
 
-def blob_movie(i,I,Q,freqs,dt,FileName,GiftName,bin_size,fontsize=8,movie=False,figsize=(4,12),fps=2):
+def blob_movie(i,I,Q,freqs,time,FileName,GiftName,bin_size,fontsize=8,movie=False,figsize=(4,12),fps=2):
     """
     Function to that creates a movie to look at the frequency evolution of the IQ blob. 
     
@@ -632,8 +632,7 @@ def blob_movie(i,I,Q,freqs,dt,FileName,GiftName,bin_size,fontsize=8,movie=False,
 
 
         ax=plt.subplot(312)
-        time=np.linspace(1,len(I[idx,:]),len(I[idx,:]),len(I[idx,:]))*dt
-        plt.plot(time,np.angle(I[idx,:]+1j*Q[idx,:]), ".", markersize=2)
+        plt.plot(time,I[idx,:], ".", markersize=2)
         plt.xlabel("Time [s]")
         plt.ylabel("Phase")
         ax.tick_params(axis='x', labelsize=fontsize)
@@ -767,3 +766,84 @@ def blob_amplitude_movie(i,I,Q,freqs,dt,average_trace,Pump_freq,amp_factor,FileN
     #If movie is false, we simply plot the image 
     else:
         create_frame(i,fontsize,FileName,bin_size,movie)
+        
+    
+    
+def rotate_data(I,Q, nb_angle):
+    """Function that rotates the dataset to maximize the I quadrature
+    
+    I : Matrix (rows are the different pump frequencies) and columns are the points (or vector)
+    Q: Matrix (rows are the different pump frequencies) and columns are the points (or vector)
+    nb_angle : numberof points that are being used in the curve of maximum of I vs angle 
+    
+    returns :
+    rotated I vector or matrix
+    rotated Q vector or matrix 
+    """
+    
+    #Defines all of the angles 
+    rotate_angle=np.linspace(-np.pi/2,0,nb_angle)
+
+    rot_I=np.zeros(I.shape)
+    rot_Q=np.zeros(Q.shape)
+
+    # For each row of I 
+    for i in range(I.shape[0]):
+        
+        Data=I[i,:]+1j*Q[i,:]
+        average=np.zeros((len(rotate_angle)))
+
+        #rotate by an angle and look at the average of the absolute value 
+        for idx,angle in enumerate(rotate_angle):
+
+            rot_Data=Data*np.exp(1j*angle)
+            average[idx]=np.mean(np.abs(rot_Data.real)) #take the average value of the absolute 
+
+        angle_max=rotate_angle[np.where(average==np.amax(average))] #select the angle where the average is maximum 
+        rot_Data=Data*np.exp(1j*angle_max)
+
+        rot_I[i,:]=rot_Data.real
+        rot_Q[i,:]=rot_Data.imag
+        
+    return rot_I, rot_Q
+
+
+def noise_average(a, n=1) :
+    """
+    This function does a static average of a vector , in order to reduce noise in too noisy signals.
+    
+    a: vector to average 
+    n : number of points using in the average. It should be a divided of the vector length 
+    
+    returns : avgResult : averaged vector 
+    """    
+    if len(a)%n != 0:
+        a = np.append(a, a[-1]*np.ones(n-len(a)%n))
+        
+    avgResult = np.average(a.reshape(-1, n), axis=1)
+    return avgResult
+
+def average_data(I,Q,time,n_avg):
+     """
+    This function does a static average using the function noise_average over a full matrix (down sample)
+    
+    time : vector of the different times 
+    I : Matrix (rows are the different pump frequencies) and columns are the points (or vector)
+    Q: Matrix (rows are the different pump frequencies) and columns are the points (or vector)
+    n_avg : number used for the average 
+    """
+        
+    
+    average_I=np.zeros(I.shape)
+    average_Q=np.zeros(Q.shape)
+    
+    time_average=noise_average(time, n=n_avg)
+
+    average_I=np.zeros((I.shape[0],time_average.shape[0]))
+    average_Q=np.zeros((I.shape[0],time_average.shape[0]))
+    
+    for i in range(I.shape[0]):
+        average_I[i,:]=noise_average(I[i,:], n=n_avg)
+        average_Q[i,:]=noise_average(Q[i,:], n=n_avg)
+        
+    return average_I, average_Q, time_average
