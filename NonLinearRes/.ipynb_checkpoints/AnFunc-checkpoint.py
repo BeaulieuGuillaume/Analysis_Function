@@ -8,8 +8,8 @@ import scipy
 from resonator_tools import circuit
 import pandas as pd
 import imageio
-
-
+import bayesian_changepoint_detection.online_changepoint_detection as oncd
+from functools import partial
 
 
 #transform dbm to watt
@@ -782,7 +782,7 @@ def rotate_data(I,Q, nb_angle):
     """
     
     #Defines all of the angles 
-    rotate_angle=np.linspace(-np.pi/2,0,nb_angle)
+    rotate_angle=np.linspace(-np.pi/2,np.pi/2,nb_angle)
 
     rot_I=np.zeros(I.shape)
     rot_Q=np.zeros(Q.shape)
@@ -800,7 +800,7 @@ def rotate_data(I,Q, nb_angle):
             average[idx]=np.mean(np.abs(rot_Data.real)) #take the average value of the absolute 
 
         angle_max=rotate_angle[np.where(average==np.amax(average))] #select the angle where the average is maximum 
-        rot_Data=Data*np.exp(1j*angle_max)
+        rot_Data=Data*np.exp(1j*angle_max[0])
 
         rot_I[i,:]=rot_Data.real
         rot_Q[i,:]=rot_Data.imag
@@ -824,26 +824,84 @@ def noise_average(a, n=1) :
     return avgResult
 
 def average_data(I,Q,time,n_avg):
-     """
+    """
     This function does a static average using the function noise_average over a full matrix (down sample)
-    
+
     time : vector of the different times 
     I : Matrix (rows are the different pump frequencies) and columns are the points (or vector)
     Q: Matrix (rows are the different pump frequencies) and columns are the points (or vector)
     n_avg : number used for the average 
     """
-        
-    
+
+
     average_I=np.zeros(I.shape)
     average_Q=np.zeros(Q.shape)
-    
+
     time_average=noise_average(time, n=n_avg)
 
     average_I=np.zeros((I.shape[0],time_average.shape[0]))
     average_Q=np.zeros((I.shape[0],time_average.shape[0]))
-    
+
     for i in range(I.shape[0]):
         average_I[i,:]=noise_average(I[i,:], n=n_avg)
         average_Q[i,:]=noise_average(Q[i,:], n=n_avg)
-        
+
     return average_I, average_Q, time_average
+
+
+
+
+def find_jumps(data, length_array_to_check,  Nw = 10):
+    """
+    This is the main function, that does check the data in bunches (for speedup reasons) 
+    to see if a jump is taking place.
+    """   
+
+    
+    ##check if it makes sense to find jumps
+    data_local=data[0:int(length_array_to_check/5)]
+    R, maxes = oncd.online_changepoint_detection(data_local, partial(oncd.constant_hazard, 250), oncd.StudentT(0.1, .01, 1, 0))   
+    jumps_local = np.where(R[Nw, Nw:-1][1:]>0.5)[0]
+    
+    if len(jumps_local)>length_array_to_check/20:
+        print("Jumps cannot be well defined: meaningless to speak of a Liouvillian gap")
+    else:
+
+        iterations = int(len(data)/ length_array_to_check)
+
+        jumps_global = np.array([])
+
+        last = 0
+
+        for j in range(iterations-1):
+            if j ==0:
+                data_local=data[0: (j+1) * length_array_to_check]
+                start = 0
+            else:
+                data_local=data[j* length_array_to_check-int(length_array_to_check/10): (j+1) * length_array_to_check]
+                start = j* length_array_to_check-int(length_array_to_check/10)
+            R, maxes = oncd.online_changepoint_detection(data_local, partial(oncd.constant_hazard, 250), oncd.StudentT(0.1, .01, 1, 0))   
+            jumps_local = np.where(R[Nw, Nw:-1][1:]>0.5)[0] +  1 + start
+            jumps_global = np.append(jumps_global, jumps_local)
+
+
+        data_local=data[-length_array_to_check : -1]
+
+        R, maxes = oncd.online_changepoint_detection(data_local, partial(oncd.constant_hazard, 250), oncd.StudentT(0.1, .01, 1, 0))   
+        jumps_local = np.where(R[Nw, Nw:-1][1:]>0.3)[0] +  1 + len(data) - length_array_to_check
+        jumps_global = np.append(jumps_global, jumps_local)
+
+
+        jumps_global = np.unique(jumps_global)
+
+        threshold = 10
+        if len(jumps_global)>0:
+            diff = np.empty(jumps_global.shape)
+            diff[0] = np.inf  # always retain the 1st element
+            diff[1:] = np.diff(jumps_global)
+            mask = diff > threshold
+
+            jumps_global = jumps_global[mask]
+
+        return jumps_global
+        
