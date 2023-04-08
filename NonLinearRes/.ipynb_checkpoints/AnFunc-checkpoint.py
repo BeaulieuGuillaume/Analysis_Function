@@ -373,6 +373,43 @@ def save_data(datadict, meastype, name, device, cooldown_date, bias=0, filepath=
          print("Data saved")
          scipy.io.savemat(filepath + cooldown_date + sep + device + sep + name + sep + meastype + '.mat'  , multidata)
         
+
+def save_with_numpy(datadict, meastype, name, device, cooldown_date, filepath=r"C:\Users\HQClabo\Documents\Data\QuantumMachine"):
+    """ Function creating a folder and a mat file to save the data contained in datadict. 
+
+    datadict : dictionnary containing the variable name and its value, "I":I
+    meastype : string of the measurement type for e.g time_rabi
+    name : string name of the folder that will contain the measurement
+    device : string of the device name
+    cooldown_data : string of the cooldown date in the following format r"\2022_05_06"
+    filepath : string of the filepath in the format """
+    
+    
+    sep = "\\" #separator in file 
+
+    # Creates the standard multidata dictionnary
+    multidata = {"MeasurementType" : meastype, "CooldownDate": cooldown_date, "Device" : device, "Name":name}
+
+    file_path=filepath + cooldown_date + sep + device + sep + name + sep + meastype +".npz"
+    folder_path=filepath + cooldown_date + sep + device + sep + name + sep 
+    
+    # Append to standard dictionnary the measurement value dictionnary
+    multidata.update(datadict)
+
+    if not os.path.exists(folder_path):
+        os.makedirs(filepath + cooldown_date + sep + device + sep + name)
+        # save it
+        print('saving in new directory')
+        np.savez(file_path, multidata=multidata)
+        
+    elif not os.path.exists(file_path):
+        print('saving')
+        np.savez(file_path, multidata=multidata)
+        
+    else:
+        print('Warning select a new file name')
+        
+
         
 
 
@@ -854,7 +891,7 @@ def average_data(I,Q,time,n_avg):
 def find_jumps(data, length_array_to_check,  Nw = 10):
     """
     This is the main function, that does check the data in bunches (for speedup reasons) 
-    to see if a jump is taking place.
+    to see if a jump is taking place mod.
     """   
 
     
