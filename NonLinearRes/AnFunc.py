@@ -540,6 +540,32 @@ def average_trace(Filename, amp):
     return Mean_Data, integrated_average, Pump_freq, Analyzer_freq
 
 
+def average_trace_numpy(Data,amplitudes,Pump_freq,Analyzer_freq):
+    """ New functions to replace average_trace with the new saving function using nump
+    The function calculates the integral over the average map
+    
+    Data : 3d matrix (must be !) of size pump freq x analyzer freq x amplitudes where each 2d matrix is the averaged for a given amplitude
+    Pump_freq: 1d matrix where each element is one pump frequency 
+    Analyzer_freq : 2d matrix where each row is the set of analyzer frequency at the corresponding pump frequency 
+    amplitudes : array of amplitudes used in the code
+    
+    returns the 2d matrix of the integrated gain where each row corresponds to a given pump amplitude and each column to a pump frequency 
+    
+    """
+    
+    
+    integrate=np.zeros((len(amplitudes),len(Pump_freq)))
+    
+
+    #for each amplitudes 
+    for j,ampli in enumerate(amplitudes):
+        mean_Data_watt=dbm_to_watt(np.mean(Data[ampli],axis=2))
+
+        for i in range(len(Pump_freq)):
+            integrate[j,i]=np.trapz(mean_Data_watt[i,:], Analyzer_freq[i,:])     
+
+    return integrate 
+
 
 def Fit_Single(x,y,plot=True):
     """ Function to fit the resonance of a single hanged resonator"""
@@ -942,3 +968,154 @@ def find_jumps(data, length_array_to_check,  Nw = 10):
 
         return jumps_global
         
+        
+        
+        
+        
+        
+def Extract_vac_exc_gap(Data,amp_factor_array,freqs_dict,n_empty,number_avg): 
+    """ Function that extracts the liouivillian gap to go from the ground state to the excited state:
+        Data : dictionnary where you have key for each frequency and time
+        freqs : 1d array of frequencies 
+        n_empty : number of points where the pump was off
+        number of average : number of points averaged to get the final curve. 
+        
+        return : Processed_Data dictionnary 
+        """
+        
+    def find_nearest(array, value):
+        "find nearest value in an array "
+        array = np.asarray(array)
+        idx = (np.abs(array - value)).argmin()
+        return idx
+
+    def func(t, A, B, Λ):
+        return A + B * np.exp( - Λ * t)
+    
+    Processed_Data={}
+    for j in range(len(amp_factor_array)):
+
+        freqs=freqs_dict[amp_factor_array[j]]
+        Processed_Data[amp_factor_array[j]]={}
+
+        for i in range(len(freqs)):
+
+            time=Data[amp_factor_array[j]][freqs[i]]["time"]
+            av=Data[amp_factor_array[j]][freqs[i]]["value"]
+
+            Processed_Data[amp_factor_array[j]][freqs[i]]={}
+           
+            #Rescaling  of the data 
+            idx_pump_start=n_empty
+            time_w_pump=time[idx_pump_start:] # time after the pmup 
+
+            number=len(time_w_pump) # how much data to consider fit 
+
+            time_fit=time[idx_pump_start:]*1e-9-time[idx_pump_start]*1e-9 #time after the pump substracted by the time of the pump to set to zero
+            av_fit=av[idx_pump_start:idx_pump_start+number]#normalize data 
+
+            #Normalize the average of the data 
+            time_fit=noise_average(time_fit,n=number_avg)
+            av_fit=noise_average(av_fit,n=number_avg)
+            av_fit=av_fit /max(av_fit)
+
+            # fitting
+            try:
+                popt, pcov = curve_fit(func, time_fit, av_fit, p0 = [1, 0, 0.01] )
+                y_fitted = popt[0]+  popt[1] * np.exp(-popt[2] * time_fit)
+                Processed_Data[amp_factor_array[j]][freqs[i]]["gap"]=popt[2]
+                Processed_Data[amp_factor_array[j]][freqs[i]]["fit_coeff"]=popt
+                Processed_Data[amp_factor_array[j]][freqs[i]]["fit_cov"]=pcov
+                Processed_Data[amp_factor_array[j]][freqs[i]]["fit"]=True
+                Processed_Data[amp_factor_array[j]][freqs[i]]["y_fitted"]=y_fitted
+                Processed_Data[amp_factor_array[j]][freqs[i]]["time_fit"]=time_fit
+                Processed_Data[amp_factor_array[j]][freqs[i]]["av_fit"]=av_fit 
+
+            #if cannot fit 
+            except RuntimeError:
+
+                Processed_Data[amp_factor_array[j]][freqs[i]]["time_fit"]=time_fit
+                Processed_Data[amp_factor_array[j]][freqs[i]]["av_fit"]=av_fit
+                Processed_Data[amp_factor_array[j]][freqs[i]]["fit"]=False
+
+
+    return  Processed_Data
+
+
+
+def Extract_second_order_gap(Data,amp_factor_array,freqs_dict,nb_angle,n_avg,corr_length):
+    """ Function that extracts the liouivillian gap to go from the ground state to the excited state:
+    Data : dictionnary where you have key for each frequency and time
+    amp_factor_array : array of all the amplitude factor
+    freqs_dict : dictionnary for all the amplitude and the frequency 
+    nb_angle : number of angle to find the optimal roation 
+    n_avg : number of points to avearge
+    corr_length : correlation length to choose 
+
+    return : Processed_Data dictionnary 
+    """
+    
+    def func(t, B, Λ):
+        return  B * np.exp( - Λ * t)
+
+    Processed_Data={}
+
+    for j in range(len(amp_factor_array)):
+        print(j)
+        freqs=freqs_dict[amp_factor_array[j]]
+        Processed_Data[amp_factor_array[j]]={}
+
+        for i in range(len(freqs)):
+
+            Processed_Data[amp_factor_array[j]][freqs[i]]={}
+
+            #Reshape I and Q to be (1, len(I))
+            Ir=np.reshape(Data[amp_factor_array[j]][freqs[i]]["I"],(1, Data[amp_factor_array[j]][freqs[i]]["I"].shape[0]))
+            Qr=np.reshape(Data[amp_factor_array[j]][freqs[i]]["Q"],(1, Data[amp_factor_array[j]][freqs[i]]["Q"].shape[0]))
+            time=Data[amp_factor_array[j]][freqs[i]]["time"]
+
+            #rotate the data 
+            rot_I,rot_Q=rotate_data(Ir,Qr,nb_angle)
+
+            #average the data 
+            average_I,average_Q,time_average=average_data(rot_I,rot_Q,time,n_avg)
+
+            #Change variable 
+            I=average_I[0,:]
+            Q=average_Q[0,:]
+            time=time_average*1e-9
+
+            Processed_Data[amp_factor_array[j]][freqs[i]]["I"]=I
+            Processed_Data[amp_factor_array[j]][freqs[i]]["Q"]=Q
+            Processed_Data[amp_factor_array[j]][freqs[i]]["time"]=time 
+
+
+
+            #calculate the correaltion 
+            corr_list = []
+            for k in range(corr_length):
+                corr=np.mean(I[0:-corr_length]*I[k:k-corr_length])
+                corr_list.append(corr)
+
+            corr_list=corr_list/max(corr_list)   
+
+
+            #fit the correlation
+            try:
+                popt, pcov = curve_fit(func, time[0:corr_length], corr_list, p0 = [1,0.01] )
+                y_fitted = popt[0] * np.exp(-popt[1] * time[0:corr_length])
+
+
+                Processed_Data[amp_factor_array[j]][freqs[i]]["gap"]=popt[1]
+                Processed_Data[amp_factor_array[j]][freqs[i]]["fit_coeff"]=popt
+                Processed_Data[amp_factor_array[j]][freqs[i]]["fit_cov"]=pcov
+                Processed_Data[amp_factor_array[j]][freqs[i]]["fit"]=True
+                Processed_Data[amp_factor_array[j]][freqs[i]]["y_fitted"]=y_fitted
+                Processed_Data[amp_factor_array[j]][freqs[i]]["corr_list"]=corr_list
+
+            except RuntimeError:
+                Processed_Data[amp_factor_array[j]][freqs[i]]["fit"]=False
+            Processed_Data[amp_factor_array[j]][freqs[i]]["corr_list"]=corr_list
+
+
+    return Processed_Data
