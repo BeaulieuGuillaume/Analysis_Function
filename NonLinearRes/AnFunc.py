@@ -552,8 +552,7 @@ def average_trace_numpy(Data,amplitudes,Pump_freq,Analyzer_freq):
     returns the 2d matrix of the integrated gain where each row corresponds to a given pump amplitude and each column to a pump frequency 
     
     """
-    
-    
+      
     integrate=np.zeros((len(amplitudes),len(Pump_freq)))
     
 
@@ -565,6 +564,35 @@ def average_trace_numpy(Data,amplitudes,Pump_freq,Analyzer_freq):
             integrate[j,i]=np.trapz(mean_Data_watt[i,:], Analyzer_freq[i,:])     
 
     return integrate 
+
+
+
+def average_trace_numpy_after(Data,amplitudes,Pump_freq,Analyzer_freq):
+    """ New functions to replace average_trace with the new saving function using nump
+    The function calculates the integral over the average map
+    
+    Data : 3d matrix (must be !) of size pump freq x analyzer freq x amplitudes where each 2d matrix is the averaged for a given amplitude
+    Pump_freq: 1d matrix where each element is one pump frequency 
+    Analyzer_freq : 2d matrix where each row is the set of analyzer frequency at the corresponding pump frequency 
+    amplitudes : array of amplitudes used in the code
+    
+    returns the 2d matrix of the integrated gain where each row corresponds to a given pump amplitude and each column to a pump frequency 
+    
+    """
+    integrate=np.zeros((Data[amplitudes[0]].shape[2],len(Pump_freq),len(amplitudes)))
+
+    #for each amplitudes 
+    for j,ampli in enumerate(amplitudes):
+
+        for k in range(Data[ampli].shape[2]):
+            mean_Data_watt=10**(Data[ampli][:,:,k]/10)
+
+            for i in range(len(Pump_freq)):
+                integrate[k,i,j]=np.trapz(mean_Data_watt[i,:], Analyzer_freq[i,:])    
+
+    return integrate 
+
+
 
 
 def Fit_Single(x,y,plot=True):
@@ -1001,12 +1029,12 @@ def Extract_vac_exc_gap(Data,amp_factor_array,freqs_dict,n_empty,number_avg):
         for i in range(len(freqs)):
 
             time=Data[amp_factor_array[j]][freqs[i]]["time"]
-            av=Data[amp_factor_array[j]][freqs[i]]["value"]
+            av=Data[amp_factor_array[j]][freqs[i]]["value"]**2 # this is square to be propertional to phton number 
 
             Processed_Data[amp_factor_array[j]][freqs[i]]={}
            
             #Rescaling  of the data 
-            idx_pump_start=n_empty
+            idx_pump_start=n_empty+1
             time_w_pump=time[idx_pump_start:] # time after the pmup 
 
             number=len(time_w_pump) # how much data to consider fit 
@@ -1017,6 +1045,9 @@ def Extract_vac_exc_gap(Data,amp_factor_array,freqs_dict,n_empty,number_avg):
             #Normalize the average of the data 
             time_fit=noise_average(time_fit,n=number_avg)
             av_fit=noise_average(av_fit,n=number_avg)
+            
+            av_fit=av_fit
+            
             av_fit=av_fit /max(av_fit)
 
             # fitting
